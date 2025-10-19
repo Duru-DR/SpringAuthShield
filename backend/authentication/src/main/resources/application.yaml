@@ -1,0 +1,41 @@
+server:
+  port: 9900
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+logging:
+  level:
+    root: INFO
+    org.springdoc: DEBUG
+    org.springdoc.api: DEBUG
+    org.springdoc.webmvc: DEBUG
+    org.springframework.web: DEBUG
+  pattern:
+    level: "%5p [${spring.application.name:},traceId=%mdc{traceId:-},spanId=%mdc{spanId:-}]"
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    url: /v3/api-docs
+    enable: true
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/${POSTGRES_NAME}
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false

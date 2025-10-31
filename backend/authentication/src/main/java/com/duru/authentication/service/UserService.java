@@ -19,7 +19,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -127,6 +126,7 @@ public class UserService {
         return new LoginResponse(newAccessToken, "Tokens refreshed");
     }
 
+    @Transactional
     public void logout(String refreshToken, HttpServletResponse response) {
         if (refreshToken != null) {
             try {

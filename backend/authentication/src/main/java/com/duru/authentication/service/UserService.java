@@ -6,6 +6,7 @@ import com.duru.authentication.dto.RegisterRequest;
 import com.duru.authentication.dto.RegisterResponse;
 import com.duru.authentication.exception.DuplicateResourceException;
 import com.duru.authentication.exception.InvalidTokenException;
+import com.duru.authentication.model.AuditInfo;
 import com.duru.authentication.model.RefreshToken;
 import com.duru.authentication.model.Role;
 import com.duru.authentication.model.User;
@@ -52,6 +53,7 @@ public class UserService {
                 .password(passwordEncoder.encode(request.password()))
                 .enabled(true)
                 .status(Status.ACTIVE)
+                .auditInfo(new AuditInfo())
                 .build();
 
         User saved = userRepository.save(toSave);

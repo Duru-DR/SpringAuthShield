@@ -1,33 +1,42 @@
 package com.duru.authentication.service;
 
+import com.duru.authentication.dto.LoginRequest;
+import com.duru.authentication.dto.LoginResponse;
 import com.duru.authentication.dto.RegisterRequest;
 import com.duru.authentication.dto.RegisterResponse;
-import com.duru.authentication.dto.SigninRequest;
-import com.duru.authentication.dto.TokenPair;
 import com.duru.authentication.exception.DuplicateResourceException;
+import com.duru.authentication.exception.InvalidTokenException;
+import com.duru.authentication.model.RefreshToken;
+import com.duru.authentication.model.Role;
 import com.duru.authentication.model.User;
+import com.duru.authentication.model.enums.Status;
+import com.duru.authentication.repository.RefreshTokenRepository;
 import com.duru.authentication.repository.UserRepository;
+import com.duru.authentication.security.jwt.JwtService;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final AuthenticationManager authManager;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final JwtService jwtService;
-    private final UserDetailsService userDetailsService;
-    private final RefreshTokenService refreshTokenService;
+    private final AuthenticationManager authenticationManager;
 
     public RegisterResponse save(RegisterRequest request) {
         if (userRepository.existsByUsername(request.username())) {
@@ -43,31 +52,118 @@ public class UserService {
                 .fullName(request.fullName())
                 .password(passwordEncoder.encode(request.password()))
                 .enabled(true)
+                .status(Status.ACTIVE)
                 .build();
 
         User saved = userRepository.save(toSave);
         return mapToResponse(saved);
     }
 
-    public TokenPair authenticate(SigninRequest request) {
-        Authentication auth = authManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.username(), request.password()));
+    public LoginResponse login(LoginRequest request, HttpServletResponse response) {
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.username(), request.password())
+            );
+        } catch (AuthenticationException e) {
+            throw new InvalidTokenException("Invalid username or password");
+        }
 
-        UserDetails principal = (UserDetails) auth.getPrincipal();
+        User user = userRepository.findByUsername(request.username())
+                .orElseThrow(() -> new InvalidTokenException("User not found"));
 
-        String accessJti = UUID.randomUUID().toString();
-        String refreshJti = UUID.randomUUID().toString();
+        Collection<String> roles = user.getRoles()
+                .stream()
+                .map(Role::getName)
+                .collect(Collectors.toList());
 
-        Instant now = Instant.now();
-        Instant accessExp = now.plus(jwtService.getAccessTtl());
-        Instant refreshExp = now.plus(jwtService.getRefreshTtl());
+        String tokenId = UUID.randomUUID().toString();
+        saveRefreshToken(user, tokenId);
 
-        String accessToken = jwtService.generateAccessToken(principal, accessJti, accessExp);
-        String refreshToken = jwtService.generateRefreshToken(principal, refreshJti, refreshExp);
+        // Generate tokens
+        String accessToken = jwtService.generateAccessToken(user.getUsername(), roles);
+        String refreshToken = jwtService.generateRefreshToken(user.getUsername(), tokenId);
 
-//        refreshTokenService.saveRefreshToken(principal.getUsername(), refreshJti, refreshExp);
+        addRefreshTokenCookie(response, refreshToken);
 
-        return new TokenPair(accessToken, refreshToken, accessExp, refreshExp);
+        return new LoginResponse(accessToken, "Login successful");
+    }
+
+    @Transactional
+    public LoginResponse refresh(String oldRefreshToken, HttpServletResponse response) {
+        if (oldRefreshToken == null)
+            throw new InvalidTokenException("Missing refresh token");
+
+        String username = jwtService.extractUsername(oldRefreshToken);
+        if (jwtService.isTokenExpired(oldRefreshToken))
+            throw new InvalidTokenException("Expired refresh token");
+
+        String tokenId = jwtService.extractClaim(oldRefreshToken, claims -> claims.get("tid", String.class));
+
+        RefreshToken storedToken = refreshTokenRepository.findByToken(tokenId)
+                .orElseThrow(() -> new InvalidTokenException("Invalid refresh token"));
+
+        if (storedToken.getExpiryDate().isBefore(Instant.now()))
+            throw new InvalidTokenException("Refresh token expired");
+
+        User user = storedToken.getUser();
+
+        // Remove old token record
+        refreshTokenRepository.delete(storedToken);
+
+        // Create new one
+        String newTokenId = UUID.randomUUID().toString();
+        saveRefreshToken(user, newTokenId);
+
+        Collection<String> roles = user.getRoles()
+                .stream()
+                .map(Role::getName)
+                .collect(Collectors.toList());
+
+        String newAccessToken = jwtService.generateAccessToken(user.getUsername(), roles);
+        String newRefreshToken = jwtService.generateRefreshToken(user.getUsername(), newTokenId);
+
+        addRefreshTokenCookie(response, newRefreshToken);
+
+        return new LoginResponse(newAccessToken, "Tokens refreshed");
+    }
+
+    public void logout(String refreshToken, HttpServletResponse response) {
+        if (refreshToken != null) {
+            try {
+                String tokenId = jwtService.extractClaim(refreshToken, claims -> claims.get("tid", String.class));
+                refreshTokenRepository.deleteByToken(tokenId);
+            } catch (Exception ignored) {
+                // ignore invalid token during logout
+            }
+        }
+        deleteRefreshTokenCookie(response);
+    }
+
+    private void saveRefreshToken(User user, String token) {
+        RefreshToken refreshToken = RefreshToken.builder()
+                .token(token)
+                .user(user)
+                .expiryDate(Instant.now().plusSeconds(60L * 60L * 24L * 7L)) // 7 days
+                .build();
+        refreshTokenRepository.save(refreshToken);
+    }
+
+    private void addRefreshTokenCookie(HttpServletResponse response, String refreshToken) {
+        Cookie cookie = new Cookie("refresh_token", refreshToken);
+        cookie.setHttpOnly(true);
+        cookie.setSecure(true);
+        cookie.setPath("/");
+        cookie.setMaxAge(7 * 24 * 60 * 60);
+        response.addCookie(cookie);
+    }
+
+    private void deleteRefreshTokenCookie(HttpServletResponse response) {
+        Cookie cookie = new Cookie("refresh_token", null);
+        cookie.setHttpOnly(true);
+        cookie.setSecure(true);
+        cookie.setPath("/");
+        cookie.setMaxAge(0);
+        response.addCookie(cookie);
     }
 
     private RegisterResponse mapToResponse(User user) {

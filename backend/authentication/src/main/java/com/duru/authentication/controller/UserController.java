@@ -11,17 +11,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
-import java.time.Duration;
-import java.time.Instant;
+/*
+fix the access token return
+fix the auditing not working problem
+* */
 
 @RestController
 @RequestMapping("/api/v1")
@@ -44,34 +41,46 @@ public class UserController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    @Operation(summary = "User signin",
-            description = "Validate user credentials and generate new access/refresh tokens")
+    @Operation(summary = "Login user",
+            description = "Authenticates a user using username and password, returns access and refresh tokens")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "User signed in successfully",
+            @ApiResponse(responseCode = "200", description = "Login successful",
                     content = @Content(mediaType = "application/json",
-                            schema = @Schema(implementation = SigninResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Validation error")
+                            schema = @Schema(implementation = LoginResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Invalid credentials")
     })
-    @PostMapping("/auth/signin")
-    public ResponseEntity<SigninResponse> register(@Valid @RequestBody SigninRequest request, HttpServletResponse response) {
-        TokenPair tokens = userService.authenticate(request);
+    @PostMapping("/auth/login")
+    public ResponseEntity<LoginResponse> login(
+            @Valid @RequestBody LoginRequest request,
+            HttpServletResponse response
+    ) {
+        return ResponseEntity.ok(userService.login(request, response));
+    }
 
-        String bearer = "Bearer " + tokens.accessToken();
+    @Operation(summary = "Refresh access token",
+            description = "Uses refresh token (from cookie) to issue new access and refresh tokens")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Tokens refreshed successfully",
+                    content = @Content(mediaType = "application/json",
+                            schema = @Schema(implementation = LoginResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Invalid or expired refresh token")
+    })
+    @PostMapping("/auth/refresh")
+    public ResponseEntity<LoginResponse> refresh(HttpServletResponse response,
+                                                @CookieValue(name = "refresh_token", required = false) String refreshToken) {
+        return ResponseEntity.ok(userService.refresh(refreshToken, response));
+    }
 
-        ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", tokens.refreshToken())
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("Strict")
-                .path("/api/v1/auth/refresh")
-                .maxAge(Duration.between(Instant.now(), tokens.refreshExpiry()))
-                .build();
-
-        long accessTtl = Duration.between(Instant.now(), tokens.accessExpiry()).getSeconds();
-
-        return ResponseEntity.ok()
-                .header(HttpHeaders.AUTHORIZATION, bearer)
-                .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
-                .body(new SigninResponse("Signed in successfully", accessTtl));
-
+    @Operation(summary = "Logout user",
+            description = "Logs out user by deleting the refresh token from database and cookie")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Logout successful"),
+            @ApiResponse(responseCode = "400", description = "No refresh token found")
+    })
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@CookieValue(name = "refresh_token", required = false) String refreshToken,
+                                       HttpServletResponse response) {
+        userService.logout(refreshToken, response);
+        return ResponseEntity.ok().build();
     }
 }

@@ -1,6 +1,9 @@
 package com.duru.authentication.config;
 
 import com.duru.authentication.security.jwt.JwtAuthenticationFilter;
+import com.duru.authentication.security.oauth2.OAuth2SuccessHandler;
+import com.duru.authentication.repository.UserRepository;
+import com.duru.authentication.util.TokenUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.*;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -18,6 +21,8 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final AuthenticationProvider daoAuthenticationProvider;
+    private final UserRepository userRepository;
+    private final TokenUtil tokenUtil;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -25,12 +30,21 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/api/v1/auth/**", "/api/v1/oauth2/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .anyRequest().authenticated()
+                )
+                .oauth2Login(oauth2 -> oauth2
+                        .successHandler(oAuth2SuccessHandler())
                 )
                 .authenticationProvider(daoAuthenticationProvider)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
+
+    @Bean
+    public OAuth2SuccessHandler oAuth2SuccessHandler() {
+        return new OAuth2SuccessHandler(userRepository, tokenUtil);
+    }
+
 }

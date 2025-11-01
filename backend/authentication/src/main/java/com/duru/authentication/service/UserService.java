@@ -14,6 +14,7 @@ import com.duru.authentication.model.enums.Status;
 import com.duru.authentication.repository.RefreshTokenRepository;
 import com.duru.authentication.repository.UserRepository;
 import com.duru.authentication.security.jwt.JwtService;
+import com.duru.authentication.util.TokenUtil;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +38,7 @@ public class UserService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final TokenUtil tokenUtil;
 
     public RegisterResponse save(RegisterRequest request) {
         if (userRepository.existsByUsername(request.username())) {
@@ -77,15 +79,7 @@ public class UserService {
                 .map(Role::getName)
                 .collect(Collectors.toList());
 
-        String tokenId = UUID.randomUUID().toString();
-        saveRefreshToken(user, tokenId);
-
-        // Generate tokens
-        String accessToken = jwtService.generateAccessToken(user.getUsername(), roles);
-        String refreshToken = jwtService.generateRefreshToken(user.getUsername(), tokenId);
-
-        addRefreshTokenCookie(response, refreshToken);
-
+        String accessToken = tokenUtil.generateAndAttachTokens(user, roles, response);
         return new LoginResponse(accessToken, "Login successful");
     }
 
@@ -111,21 +105,13 @@ public class UserService {
         // Remove old token record
         refreshTokenRepository.delete(storedToken);
 
-        // Create new one
-        String newTokenId = UUID.randomUUID().toString();
-        saveRefreshToken(user, newTokenId);
-
         Collection<String> roles = user.getRoles()
                 .stream()
                 .map(Role::getName)
                 .collect(Collectors.toList());
 
-        String newAccessToken = jwtService.generateAccessToken(user.getUsername(), roles);
-        String newRefreshToken = jwtService.generateRefreshToken(user.getUsername(), newTokenId);
-
-        addRefreshTokenCookie(response, newRefreshToken);
-
-        return new LoginResponse(newAccessToken, "Tokens refreshed");
+        String accessToken = tokenUtil.generateAndAttachTokens(user, roles, response);
+        return new LoginResponse(accessToken, "Tokens refreshed");
     }
 
     @Transactional
@@ -138,34 +124,7 @@ public class UserService {
                 // ignore invalid token during logout
             }
         }
-        deleteRefreshTokenCookie(response);
-    }
-
-    private void saveRefreshToken(User user, String token) {
-        RefreshToken refreshToken = RefreshToken.builder()
-                .token(token)
-                .user(user)
-                .expiryDate(Instant.now().plusSeconds(60L * 60L * 24L * 7L)) // 7 days
-                .build();
-        refreshTokenRepository.save(refreshToken);
-    }
-
-    private void addRefreshTokenCookie(HttpServletResponse response, String refreshToken) {
-        Cookie cookie = new Cookie("refresh_token", refreshToken);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(true);
-        cookie.setPath("/");
-        cookie.setMaxAge(7 * 24 * 60 * 60);
-        response.addCookie(cookie);
-    }
-
-    private void deleteRefreshTokenCookie(HttpServletResponse response) {
-        Cookie cookie = new Cookie("refresh_token", null);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(true);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);
-        response.addCookie(cookie);
+        tokenUtil.deleteRefreshTokenCookie(response);
     }
 
     private RegisterResponse mapToResponse(User user) {

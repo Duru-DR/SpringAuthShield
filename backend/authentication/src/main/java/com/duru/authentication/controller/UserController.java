@@ -15,10 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-/*
-fix the access token return
-fix the auditing not working problem
-* */
+import java.io.IOException;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -82,5 +79,10 @@ public class UserController {
                                        HttpServletResponse response) {
         userService.logout(refreshToken, response);
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/auth/google")
+    public void redirectToGoogle(HttpServletResponse response) throws IOException {
+        response.sendRedirect("/oauth2/authorization/google");
     }
 }

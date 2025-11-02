@@ -28,5 +28,11 @@ public class RefreshToken {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    public RefreshToken(String string, User user, Instant instant) {
+        this.token = string;
+        this.user = user;
+        this.expiryDate = instant;
+    }
 }
 

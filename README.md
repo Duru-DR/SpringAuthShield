@@ -1,6 +1,9 @@
 # SpringAuthShield - Secure Authentication System
 A production-grade authentication system built with Spring Boot 3, featuring JWT-based login, token refresh, secure cookie storage, Google OAuth2 login, and comprehensive testing (unit + integration).
 
+## 🎥 Demo
+![Demo](./demo/demo.webm)
+
 ## 🚀 Features
 
 ✅ User Registration & Login

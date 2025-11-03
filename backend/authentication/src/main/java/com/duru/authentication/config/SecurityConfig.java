@@ -4,6 +4,7 @@ import com.duru.authentication.security.jwt.JwtAuthenticationFilter;
 import com.duru.authentication.security.oauth2.OAuth2SuccessHandler;
 import com.duru.authentication.repository.UserRepository;
 import com.duru.authentication.util.TokenUtil;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.*;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -30,10 +31,15 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**", "/api/v1/oauth2/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/api/v1/auth/**", "/api/v1/auth/google", "/api/v1/oauth2/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .anyRequest().authenticated()
                 )
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((request, response, authException) ->
+                                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized"))
+                )
                 .oauth2Login(oauth2 -> oauth2
+                        .loginPage("/api/v1/auth/google")
                         .successHandler(oAuth2SuccessHandler())
                 )
                 .authenticationProvider(daoAuthenticationProvider)
